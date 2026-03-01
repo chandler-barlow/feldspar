@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 steel-core = { git = "https://github.com/mattwparas/steel.git", branch = "master" }
+steel-derive = { git = "https://github.com/mattwparas/steel.git", branch = "master" }
 genai = "0.1"
 tokio = { version = "1", features = ["full"] }
 rustyline = "15"

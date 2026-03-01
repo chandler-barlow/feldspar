@@ -4,16 +4,86 @@ use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
 use genai::{Client, ModelIden, ServiceTarget};
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
+use std::fmt::{self, Display, Write};
 use std::fs;
 use std::{cell::RefCell, env};
 use steel::steel_vm::engine::Engine;
 use steel::steel_vm::register_fn::RegisterFn;
+use steel_derive::Steel;
 
 struct ModelConfig {
     url: String,
     token: String,
     model: String,
     adapter: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Steel)]
+enum ToolSchema {
+    Number,
+    String,
+    Bool,
+}
+
+impl fmt::Display for ToolSchema {
+    fn fmt(self: &Self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            ToolSchema::Number => write!(f, "<number>"),
+            ToolSchema::String => write!(f, "<string>"),
+            ToolSchema::Bool => write!(f, "<bool>"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Steel)]
+struct Tool {
+    name: String,
+    description: String,
+    schema: Vec<(String, ToolSchema)>,
+    handler: String,
+}
+
+impl Tool {
+    pub fn new(
+        name: String,
+        desc: String,
+        schema: Vec<(String, ToolSchema)>,
+        handler: String,
+    ) -> Tool {
+        return Tool {
+            name,
+            description: desc,
+            schema,
+            handler,
+        };
+    }
+
+    pub fn describe(&self) -> String {
+        let mut d = String::new();
+        writeln!(d, "Name: {}", self.name).unwrap();
+        writeln!(d, "Description: {}", self.description).unwrap();
+        let mut pretty_schema = String::new();
+        for (k, t) in self.schema.clone() {
+            writeln!(pretty_schema, "{{\"{}\": {} }},", k, t).unwrap();
+        }
+        writeln!(d, "Schema: [\n {}\n]", self.description).unwrap();
+        writeln!(d, "Description: {}", self.description).unwrap();
+        return d;
+    }
+}
+
+fn register_std_tool(engine: &mut Engine) {
+    // Tool types and functions
+    engine
+        .register_type::<Tool>("tool")
+        .register_fn("tool/new", Tool::new)
+        .register_fn("tool/describe", Tool::describe);
+
+    engine
+        .register_type::<ToolSchema>("tool-schema")
+        .register_fn("tool-schema/string", || ToolSchema::String)
+        .register_fn("tool-schema/number", || ToolSchema::Number)
+        .register_fn("tool-schema/bool", || ToolSchema::Bool);
 }
 
 impl Default for ModelConfig {
@@ -31,6 +101,7 @@ thread_local! {
     static TOKIO_RT: RefCell<tokio::runtime::Runtime> = RefCell::new(
         tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime")
     );
+    // I think this shouldn't be like this
     static MODEL_CONFIG: RefCell<ModelConfig> = RefCell::new(ModelConfig::default());
 }
 
@@ -133,12 +204,21 @@ fn lookup_env(v: String) -> Result<String, String> {
     }
 }
 
+fn register_std_io(engine: &mut Engine) {
+    engine.register_fn("lookup-env", lookup_env);
+}
+
+fn register_std_chat(engine: &mut Engine) {
+    engine.register_fn("prompt", prompt);
+    engine.register_fn("configure-model", configure_model);
+}
+
 fn init() -> Engine {
     let mut engine = Engine::new_sandboxed();
 
-    engine.register_fn("prompt", prompt);
-    engine.register_fn("lookup-env", lookup_env);
-    engine.register_fn("configure-model", configure_model);
+    register_std_chat(&mut engine);
+    register_std_io(&mut engine);
+    register_std_tool(&mut engine);
 
     println!("Type :help for commands\n");
 
